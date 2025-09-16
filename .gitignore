@@ -1,0 +1,33 @@
+# Build artifacts
+target/
+*.log
+
+# IDE files
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*~
+
+# Maven
+.mvn/timing.properties
+.mvn/wrapper/maven-wrapper.jar
+
+# Test reports (may contain system-specific info)
+**/surefire-reports/
+**/failsafe-reports/
+
+# Personal configuration files that might contain sensitive info
+.testcontainers.properties.local
+
+# Privacy cleanup documentation (contains references to original personal data)
+PRIVACY_CLEANUP_SUMMARY.md

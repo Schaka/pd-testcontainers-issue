@@ -26,7 +26,7 @@ public class HostApplication {
         System.out.println("Detected LAN IP: " + lanIpAddress);
         
         // Create HTTP server bound to the LAN IP
-        InetSocketAddress address = new InetSocketAddress(lanIpAddress, PORT);
+        InetSocketAddress address = new InetSocketAddress("0.0.0.0", PORT);
         this.server = HttpServer.create(address, 0);
         
         // Add handlers

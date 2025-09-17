@@ -1,5 +1,8 @@
 package com.example;
 
+import com.microsoft.playwright.*;
+import com.microsoft.playwright.options.ViewportSize;
+import lombok.Getter;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.AfterEach;
@@ -11,10 +14,16 @@ import org.testcontainers.utility.DockerImageName;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
+import java.net.URISyntaxException;
+import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.Enumeration;
 
+import static com.example.HostAddresses.HOST_ADDRESS;
+import static com.example.PodmanDesktopNetworkingTest.BrowserMode.*;
+import static com.example.PodmanDesktopNetworkingTest.BrowserMode.CDP;
+import static com.example.PodmanDesktopNetworkingTest.BrowserMode.LOCAL_HEADFUL;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -28,28 +37,57 @@ import static org.junit.jupiter.api.Assertions.*;
 @Testcontainers
 public class PodmanDesktopNetworkingTest {
 
-    private static final String CHROME_IMAGE = "selenium/standalone-chrome:latest";
+    private static final String CHROME_IMAGE = "yukinying/chrome-headless-browser:133.0.6835.3";;
     private static final int HOST_PORT = 8080;
-    
+
+    public enum BrowserMode {
+        CDP,
+        LOCAL_HEADFUL,
+        LOCAL_HEADLESS;
+    }
+
+    private static final BrowserMode BROWSER_MODE = CDP;
+
     private HostApplication hostApp;
-    private String lanIpAddress;
+
+    private Playwright playwright;
+    protected BrowserContext browserContext;
+
+    protected Page page;
 
     @Container
-    private GenericContainer<?> chromeContainer = new GenericContainer<>(DockerImageName.parse(CHROME_IMAGE))
-            .withPrivilegedMode(true)  // Equivalent to SYS_ADMIN capability
-            // Temporarily disable withAccessToHost to test basic functionality
-            // .withAccessToHost(true)    // This is the key setting from the user's setup
-            .withStartupTimeout(Duration.ofMinutes(3));
+    private ChromeContainer chromeContainer = new ChromeContainer(DockerImageName.parse(CHROME_IMAGE));
 
     @BeforeEach
-    void setUp() throws IOException {
+    void setUp() throws IOException, URISyntaxException {
         // Start the host application
         hostApp = new HostApplication();
         hostApp.start();
-        lanIpAddress = hostApp.getLanIpAddress();
-        
-        System.out.println("Host application started on: " + lanIpAddress + ":" + HOST_PORT);
+
+        System.out.println("Host application started on: " + HOST_ADDRESS + ":" + HOST_PORT);
         System.out.println("Chrome container will attempt to connect to this address");
+
+        initPlaywright();
+    }
+
+    protected void initPlaywright( ) throws URISyntaxException, IOException {
+        playwright = Playwright.create( );
+        final Browser browser;
+        final BrowserType chromium = playwright.chromium( );
+        browser = switch ( BROWSER_MODE ) {
+            case CDP -> chromium.connectOverCDP( chromeContainer.getCDPAddress( ) );
+            case LOCAL_HEADFUL -> chromium.launch( new BrowserType.LaunchOptions( ).setHeadless( false ) );
+            case LOCAL_HEADLESS -> chromium.launch( new BrowserType.LaunchOptions( ).setHeadless( true ) );
+        };
+
+        final Browser.NewContextOptions newContextOptions = new Browser.NewContextOptions( )
+                .setBaseURL( String.format( "http://%s:%s/", HOST_ADDRESS, HOST_PORT ) )
+                .setViewportSize( new ViewportSize( 1920, 960 ) );
+
+        browserContext = browser.newContext( newContextOptions );
+        browserContext.setDefaultTimeout( 60_000 );
+
+        page = browserContext.newPage( );
     }
 
     @AfterEach
@@ -57,6 +95,11 @@ public class PodmanDesktopNetworkingTest {
         if (hostApp != null) {
             hostApp.stop();
         }
+    }
+
+    @Test
+    void testBrowserAccessToHost() {
+        page.navigate("/test");
     }
 
     @Test
@@ -83,7 +126,7 @@ public class PodmanDesktopNetworkingTest {
         // Test ping to the LAN IP
         try {
             var pingResult = chromeContainer.execInContainer(
-                "ping", "-c", "3", lanIpAddress
+                "ping", "-c", "3", HOST_ADDRESS
             );
             
             System.out.println("Ping exit code: " + pingResult.getExitCode());
@@ -105,7 +148,7 @@ public class PodmanDesktopNetworkingTest {
     private void testHttpCommunication() {
         System.out.println("\n=== Testing HTTP Communication ===");
         
-        String hostUrl = "http://" + lanIpAddress + ":" + HOST_PORT;
+        String hostUrl = "http://" + HOST_ADDRESS + ":" + HOST_PORT;
         
         try {
             // Test connection to root endpoint
@@ -139,8 +182,8 @@ public class PodmanDesktopNetworkingTest {
     private void testMultipleRequests() {
         System.out.println("\n=== Testing Multiple Requests ===");
         
-        String healthUrl = "http://" + lanIpAddress + ":" + HOST_PORT + "/health";
-        String testUrl = "http://" + lanIpAddress + ":" + HOST_PORT + "/test";
+        String healthUrl = "http://" + HOST_ADDRESS + ":" + HOST_PORT + "/health";
+        String testUrl = "http://" + HOST_ADDRESS + ":" + HOST_PORT + "/test";
         
         // Test multiple endpoints to simulate real-world usage
         String[] urls = {healthUrl, testUrl};
@@ -183,7 +226,7 @@ public class PodmanDesktopNetworkingTest {
             System.out.println(routeResult.getStdout());
             
             // Test DNS resolution
-            var nslookupResult = chromeContainer.execInContainer("nslookup", lanIpAddress);
+            var nslookupResult = chromeContainer.execInContainer("nslookup", HOST_ADDRESS);
             System.out.println("DNS lookup for LAN IP:");
             System.out.println("Exit code: " + nslookupResult.getExitCode());
             System.out.println("Output: " + nslookupResult.getStdout());
